@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter
 import torch.nn.functional as F
-from PIL import Image, ImageDraw, ImageFont
+from depreciation_analysis import generate_depreciation_record
 
 class FullModel(torch.nn.Module):
     def __init__(self, encoder, bn, decoder):
@@ -148,3 +148,14 @@ if __name__ == "__main__":
     annotated_img = extract_and_annotate_defects(img_resized, anomaly_map, threshold=0.8)
     cv2.imwrite("heatmap_annotated.png", cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR))
     print("📌 缺陷區域已標註 → heatmap_annotated.png")
+    
+    # 6️⃣ 折舊分析
+    record = generate_depreciation_record(defects)
+    # ✅ 印出折舊分析結果
+    print(f"\n📊 折舊分析報告（{record['timestamp']}）")
+    print(f"等級：{record['grade']}")
+    print(f"缺陷數量：{record['defect_count']}")
+    print(f"總面積：{record['total_area']:.1f}")
+    print(f"平均深度：{record['avg_depth']:.2f}")
+    print(f"最大深度：{record['max_depth']:.2f}")
+    print(f"折舊指數：{record['defect_index']:.2f}")
