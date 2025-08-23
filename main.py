@@ -115,19 +115,19 @@ def extract_and_annotate_defects(img, anomaly_map, threshold=0.6):
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # 1️⃣ 一行載入完整模型（需訓練時整個 torch 模型保存）
+    # 1.一行載入完整模型（需訓練時整個 torch 模型保存）
     model = torch.load("fullmodel_wres50_bottle.pth", map_location=device, weights_only=False)
     model.to(device).eval()
     # feats, recons = model(img_tensor)
 
-    # 2️⃣ 讀取單張圖片
+    # 2.讀取單張圖片
     img_bgr = cv2.imread("test_bottle.png")
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img_resized = cv2.resize(img_rgb, (256, 256))
     img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0
     img_tensor = img_tensor.to(device)
 
-    # 3️⃣ 推論
+    # 3.推論
     with torch.no_grad():
         feats, recons = model(img_tensor)  # 假設你的模型 forward 回傳 (features, reconstructions)
         anomaly_map, _ = cal_anomaly_map([feats[-1]], [recons[-1]], img_tensor.shape[-1])
@@ -135,13 +135,14 @@ if __name__ == "__main__":
         ano_map_norm = min_max_norm(anomaly_map) * 255
         ano_map_color = cvt2heatmap(ano_map_norm)
 
-    # 4️⃣ 疊加熱力圖
+    # 4.疊加熱力圖
     overlay = show_cam_on_image(img_resized, ano_map_color)
 
-    # 5️⃣ 儲存
+    # 5.儲存
     cv2.imwrite("heatmap_overlay.png", cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
     print("✅ 單張影像缺陷熱力圖已完成 → heatmap_overlay.png")
     
+    # 6. 缺陷區域分析/缺陷區域標註
     defects = extract_defect_regions(anomaly_map, threshold=0.8)
     for i, d in enumerate(defects):
         print(f"🔧 缺陷 {i+1}: 面積={d['area']:.1f}, 中心={d['center']}, 長寬={d['size']}, 深度={d['depth']:.3f}")
@@ -149,7 +150,7 @@ if __name__ == "__main__":
     cv2.imwrite("heatmap_annotated.png", cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR))
     print("📌 缺陷區域已標註 → heatmap_annotated.png")
     
-    # 6️⃣ 折舊分析
+    # 7.折舊分析
     record = generate_depreciation_record(defects)
     # ✅ 印出折舊分析結果
     print(f"\n📊 折舊分析報告（{record['timestamp']}）")
