@@ -1,0 +1,60 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.env
+.venv/
+env/
+venv/
+
+# =========================
+# AI / ML Training
+# =========================
+# Model weights / checkpoints
+*.pth
+*.h5
+*.ckpt
+*.pt
+*.onnx
+
+# Training outputs
+runs/
+outputs/
+results/
+checkpoints/
+experiments/
+
+# TensorBoard logs
+logs/
+events.out.tfevents.*
+
+# Datasets / large files
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+*.csv
+*.tsv
+*.npz
+*.npy
+
+# =========================
+# Jupyter / Colab
+# =========================
+.ipynb_checkpoints/
+*.ipynb
+
+# =========================
+# IDE / System
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
