@@ -250,11 +250,21 @@ if __name__ == "__main__":  # 判斷是否為主程式執行（避免被其他�
     # 11. 使用 MLP 模型進行折舊分析
     record = generate_depreciation_record(defects, mlp_model=mlp_model)
     print("\n📊 折舊分析紀錄（使用 MLP 模型）")
+
     for key, value in record.items():
-        if key != "defects":
-            print(f"{key}: {value}")  # 印出分析指標
-        else:
+        if key == "defects":
             print(f"{key}:")  # 印出缺陷清單
             for i, defect in enumerate(value):
                 print(f"  🔧 缺陷 {i+1}: 面積={defect['area']:.1f}, 中心={defect['center']}, 長寬={defect['size']}, 深度={defect['depth']:.3f}")
+        elif key == "confidence":
+            print(f"{key}: {value:.2f}")  # 印出信心分數（保留兩位小數）
+        else:
+            print(f"{key}: {value}")  # 印出其他分析指標
+
+    # 12. 儲存紀錄至 CSV 檔案
+    save_record_to_csv(record)
+    print("✅ 已儲存紀錄至 CSV")
+    # 13. 訓練 MLP 模型（可依紀錄數量條件觸發）
+    if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:  # 每新增 1 筆就 retrain（可調整條件）
+        train_mlp_from_csv()        
     print("✅ 已完成 MLP 折舊分析")

@@ -98,13 +98,14 @@ def generate_depreciation_record(defects,mlp_model=None):
     """
     metrics = compute_depreciation_metrics(defects)
     if mlp_model: #使用 MLP 模型根據缺陷指標預測折舊等級。
-        grade = classify_depreciation_mlp(metrics, mlp_model)
+        grade, confidence = classify_depreciation_mlp(metrics, mlp_model)
     else:       #使用簡單的閾值分類
         grade = classify_depreciation(metrics["defect_index"])
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     return {
         "timestamp": timestamp,
         "grade": grade,
+        "confidence": confidence if mlp_model else "N/A",
         **metrics,
         "defects": defects
     }
@@ -136,20 +137,31 @@ class DepreciationMLP(nn.Module):
 
 def classify_depreciation_mlp(metrics, mlp_model):
     """
-    使用 MLP 模型根據缺陷指標預測折舊等級。
+    使用 MLP 模型根據缺陷指標預測折舊等級，並回傳信心分數。
     🔢 輸入：metrics dict（包含 defect_index、avg_depth、max_depth、total_area）
-    🔁 回傳：折舊等級字串
+    🔁 回傳：tuple → (折舊等級字串, 信心分數)
     """
-    # 🧮 將 dict 中的指標轉換為張量，並加上 batch 維度
+    # 🧮 將指標轉為張量並加上 batch 維度
     input_tensor = torch.tensor([
         metrics["defect_index"],
         metrics["avg_depth"],
         metrics["max_depth"],
         metrics["total_area"]
-    ], dtype=torch.float32).unsqueeze(0) # shape: [1, 4]
-    # 🚫 關閉梯度計算，進行推論
+    ], dtype=torch.float32).unsqueeze(0)
+
+    # 🚫 推論模式（停用梯度）
     with torch.no_grad():
-        logits = mlp_model(input_tensor) # 前向傳播，取得分類 logits
-        pred = torch.argmax(logits, dim=1).item() # 取最大值索引作為預測類別
-    # 🔁 將類別索引轉換為折舊等級字串
-    return ["A - 正常", "B - 觀察中", "C - 建議維修"][pred]
+        logits = mlp_model(input_tensor)  # 前向傳播,logits 是 MLP 模型的原始輸出（未經標準化），通常是每個類別的分數
+        probs = torch.softmax(logits, dim=1)  # 計算 softmax 機率分布，softmax 將 logits 轉換為機率分布，使所有類別的機率加總為 1。
+        #EX:logits = [1.2, 3.5, 0.8] (所有類別的機率加總為1時)-> probs = [0.12, 0.82, 0.06]
+        pred = torch.argmax(probs, dim=1).item()  # 取得預測類別索引，pred 是最大機率的類別索引（即模型預測的分類）。
+        confidence = probs[0, pred].item()  # 取得該類別的信心分數，是該類別的機率值，代表模型對這個預測的信心。
+
+    # 📤 回傳等級與信心分數
+    label = ["A - 正常", "B - 觀察中", "C - 建議維修"]
+    # 信心分數(confidence)的用途：
+    # 報表呈現：讓使用者知道預測是否可靠
+    # 警示機制：若信心低於某門檻（例如 0.6），可標示為「不確定」
+    # 模型評估：可用於 ROC 曲線、Precision-Recall 分析
+    # 決策支援：高信心可自動通過，低信心可轉人工複核
+    return label[pred], confidence
