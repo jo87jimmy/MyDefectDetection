@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import os
+
+# 無載入舊權重版
 # def train_mlp_from_csv(csv_path="depreciation_records.csv", output_path="depreciation_mlp.pth"):
 #     """
 #     負責從 CSV 資料訓練折舊分析用的 MLP 模型，並儲存為 .pth 檔案
@@ -56,10 +58,6 @@ def train_mlp_from_csv(csv_path="depreciation_records.csv", output_path="depreci
     if os.path.exists(output_path):
         print(f"📂 偵測到已存在模型 {output_path}，將載入並繼續訓練")
         model.load_state_dict(torch.load(output_path,weights_only=True))  # 載入權重
-    #     model = torch.load(output_path, weights_only=True)
-    # else:
-    #     print("🆕 未偵測到模型，建立新模型進行訓練")
-    #     model = DepreciationMLP()
 
     # ⚙️ 訓練元件設定
     criterion = nn.CrossEntropyLoss()
