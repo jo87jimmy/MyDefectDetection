@@ -1,5 +1,6 @@
 import numpy as np
 from datetime import datetime
+import torch
 # 📌 模組用途：
 # 本模組用於分析影像中的缺陷資訊，並根據缺陷面積與深度計算折舊指數（defect_index），
 # 進一步判斷物件的折舊等級（正常／觀察中／建議維修），並生成一筆完整的折舊分析紀錄。
@@ -59,7 +60,7 @@ def classify_depreciation(defect_index):
     else:
         return "C - 建議維修"
 
-def generate_depreciation_record(defects):
+def generate_depreciation_record(defects,mlp_model=None):
     """
     📌 用途：
     整合折舊分析流程，生成一筆完整的紀錄。
@@ -75,7 +76,10 @@ def generate_depreciation_record(defects):
     一個 dict 結構的折舊分析紀錄
     """
     metrics = compute_depreciation_metrics(defects)
-    grade = classify_depreciation(metrics["defect_index"])
+    if mlp_model:
+        grade = classify_depreciation_mlp(metrics, mlp_model)
+    else:
+        grade = classify_depreciation(metrics["defect_index"])
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     return {
@@ -84,3 +88,35 @@ def generate_depreciation_record(defects):
         **metrics,
         "defects": defects
     }
+import torch.nn as nn
+
+class DepreciationMLP(nn.Module):
+    def __init__(self, input_dim=4, hidden_dim=16, output_dim=3):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+def classify_depreciation_mlp(metrics, mlp_model):
+    """
+    使用 MLP 模型根據缺陷指標預測折舊等級。
+    🔢 輸入：metrics dict（包含 defect_index、avg_depth、max_depth、total_area）
+    🔁 回傳：折舊等級字串
+    """
+    input_tensor = torch.tensor([
+        metrics["defect_index"],
+        metrics["avg_depth"],
+        metrics["max_depth"],
+        metrics["total_area"]
+    ], dtype=torch.float32).unsqueeze(0)
+
+    with torch.no_grad():
+        logits = mlp_model(input_tensor)
+        pred = torch.argmax(logits, dim=1).item()
+
+    return ["A - 正常", "B - 觀察中", "C - 建議維修"][pred]

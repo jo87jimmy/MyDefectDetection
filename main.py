@@ -4,7 +4,9 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 import torch.nn.functional as F
 from depreciation_analysis import generate_depreciation_record
+from train_depreciation_mlp import train_mlp_from_csv
 
+from train_depreciation_mlp import DepreciationMLP  # 先把 class 匯入
 class FullModel(torch.nn.Module):
     def __init__(self, encoder, bn, decoder):
         super().__init__()
@@ -111,6 +113,53 @@ def extract_and_annotate_defects(img, anomaly_map, threshold=0.6):
 
     return annotated
 
+import pandas as pd
+import os
+
+def save_record_to_csv(record, csv_path="depreciation_records.csv"):
+    df = pd.DataFrame([record])  # 單筆轉成 DataFrame
+    if os.path.exists(csv_path):
+        df.to_csv(csv_path, mode='a', header=False, index=False)
+    else:
+        df.to_csv(csv_path, index=False)
+        
+import re
+def safe_load(path, map_location="cpu", weights_only=True, extra_globals=None):
+    """
+    自動安全載入 torch 模型檔案 (.pth)
+    會根據錯誤訊息自動將缺少的 global 類別/函式加入安全清單
+    
+    Args:
+        path (str): 模型檔案路徑
+        map_location: 載入到哪個裝置 (預設 "cpu")
+        weights_only (bool): 是否只載入權重 (推薦 True)
+        extra_globals (list): 額外要允許的類別，例如 [MyModel]
+    """
+    if extra_globals:
+        torch.serialization.add_safe_globals(extra_globals)
+
+    while True:
+        try:
+            return torch.load(path, map_location=map_location, weights_only=weights_only)
+        except Exception as e:
+            msg = str(e)
+            # 嘗試解析錯誤訊息中的類別名稱
+            match = re.search(r"Unsupported global: GLOBAL (.+?) ", msg)
+            if match:
+                global_name = match.group(1)
+                print(f"⚠️ 檔案需要允許：{global_name}")
+
+                # 對於內建類型 (例如 builtins.set)，用 eval 取到對象
+                try:
+                    obj = eval(global_name.replace("builtins.", ""))
+                    torch.serialization.add_safe_globals([obj])
+                    print(f"✅ 已允許 {global_name}")
+                except Exception as e2:
+                    print(f"❌ 無法自動允許 {global_name}, 請手動加入: {e2}")
+                    raise
+            else:
+                raise  # 不是 Unsupported global 就直接丟出
+
 # ===== 主程式 =====
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -160,3 +209,35 @@ if __name__ == "__main__":
     print(f"平均深度：{record['avg_depth']:.2f}")
     print(f"最大深度：{record['max_depth']:.2f}")
     print(f"折舊指數：{record['defect_index']:.2f}")
+    
+    #8.加入紀錄資料的CSV儲存
+    save_record_to_csv(record)
+    print("✅ 已儲存紀錄至 CSV")
+    #9.訓練MLP模型
+    # 可選：每新增 50 筆就 retrain
+    if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:
+        train_mlp_from_csv()
+    print("✅ 已重新訓練 MLP 模型")
+    # ✅ 把 DepreciationMLP 加進 PyTorch 安全清單
+    mlp_model = safe_load(
+        "depreciation_mlp.pth",
+        map_location=device,   # 或 device
+        weights_only=True,
+        extra_globals=[DepreciationMLP]  # 先加自己的模型 class
+    )
+    # torch.serialization.add_safe_globals([DepreciationMLP,set])
+    # 載入 MLP 模型（需事先訓練好並儲存）
+    # mlp_model = torch.load("depreciation_mlp.pth", map_location=device,weights_only=True)
+    mlp_model.eval()
+
+    # 折舊分析（使用 MLP）
+    record = generate_depreciation_record(defects, mlp_model=mlp_model)
+    # ✅ 印出完整折舊分析紀錄（含 MLP 等級）
+print("\n📊 折舊分析紀錄（使用 MLP 模型）")
+for key, value in record.items():
+    if key != "defects":
+        print(f"{key}: {value}")
+    else:
+        print(f"{key}:")
+        for i, defect in enumerate(value):
+            print(f"  🔧 缺陷 {i+1}: 面積={defect['area']:.1f}, 中心={defect['center']}, 長寬={defect['size']}, 深度={defect['depth']:.3f}")
