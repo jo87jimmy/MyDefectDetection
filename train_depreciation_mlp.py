@@ -2,11 +2,9 @@
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 import numpy as np
-
+from datetime import datetime
 def train_mlp_from_csv(csv_path="depreciation_records.csv", output_path="depreciation_mlp.pth"):
     df = pd.read_csv(csv_path)
 
@@ -34,82 +32,122 @@ def train_mlp_from_csv(csv_path="depreciation_records.csv", output_path="depreci
     torch.save(model, output_path)
     print(f"✅ 模型已訓練並儲存至 {output_path}")
 
+# 📌 模組用途：
+# 本模組用於分析影像中的缺陷資訊，並根據缺陷面積與深度計算折舊指數（defect_index），
+# 進一步判斷物件的折舊等級（正常／觀察中／建議維修），並生成一筆完整的折舊分析紀錄。
+# 適用於品質監控、設備維護、製程追蹤等場景，可整合至 dashboard 或報表系統。
+def compute_depreciation_metrics(defects):
+    """
+    📌 用途：
+    根據缺陷清單計算折舊分析的核心指標。
+    每個缺陷的影響力以「面積 × 深度」表示，並統計整體缺陷數量、平均深度、最大深度與總面積。
+    
+    🔢 回傳內容：
+    - defect_index：折舊指數（面積 × 深度 的加總）
+    - defect_count：缺陷數量
+    - avg_depth：平均深度
+    - max_depth：最大深度
+    - total_area：所有缺陷的總面積
+    """
+    if not defects:
+        return {
+            "defect_index": 0,
+            "defect_count": 0,
+            "avg_depth": 0,
+            "max_depth": 0,
+            "total_area": 0
+        }
 
-# 模擬資料（你可以改成讀取 CSV）
-def generate_sample_data(num_samples=300):
-    np.random.seed(42)
-    defect_index = np.random.rand(num_samples)
-    avg_depth = np.random.rand(num_samples)
-    max_depth = avg_depth + np.random.rand(num_samples) * 0.5
-    total_area = np.random.rand(num_samples) * 100
+    defect_index = sum([d['area'] * d['depth'] for d in defects])
+    avg_depth = np.mean([d['depth'] for d in defects])
+    max_depth = np.max([d['depth'] for d in defects])
+    total_area = sum([d['area'] for d in defects])
 
-    # 簡單規則生成 label（可替換為真實標註）
-    label = []
-    for i in range(num_samples):
-        if defect_index[i] < 0.3 and max_depth[i] < 0.5:
-            label.append(0)  # A - 正常
-        elif defect_index[i] < 0.6:
-            label.append(1)  # B - 觀察中
-        else:
-            label.append(2)  # C - 建議維修
-
-    df = pd.DataFrame({
+    return {
         "defect_index": defect_index,
+        "defect_count": len(defects),
         "avg_depth": avg_depth,
         "max_depth": max_depth,
-        "total_area": total_area,
-        "label": label
-    })
-    return df
+        "total_area": total_area
+    }
 
-# 模型定義
+def classify_depreciation(defect_index):
+    """
+    📌 用途：
+    根據折舊指數（defect_index）進行分級判斷，協助使用者快速了解物件目前的健康狀態。
+    
+    📊 分級邏輯：
+    - A：正常（defect_index < 50）
+    - B：觀察中（50 ≤ defect_index < 150）
+    - C：建議維修（defect_index ≥ 150）
+    
+    🔁 回傳：
+    對應的折舊等級字串（含建議）
+    """
+    if defect_index < 50:
+        return "A - 正常"
+    elif defect_index < 150:
+        return "B - 觀察中"
+    else:
+        return "C - 建議維修"
+
+def generate_depreciation_record(defects,mlp_model=None):
+    """
+    📌 用途：
+    整合折舊分析流程，生成一筆完整的紀錄。
+    包含分析時間、折舊等級、各項指標與原始缺陷清單，方便儲存、追蹤與可視化。
+    
+    🧩 組成：
+    - timestamp：分析時間（格式：YYYY-MM-DD HH:MM）
+    - grade：折舊等級（由 classify_depreciation 判斷）
+    - defect_index / defect_count / avg_depth / max_depth / total_area：由 compute_depreciation_metrics 計算
+    - defects：原始缺陷清單（含面積、深度、位置等）
+    
+    🔁 回傳：
+    一個 dict 結構的折舊分析紀錄
+    """
+    metrics = compute_depreciation_metrics(defects)
+    if mlp_model:
+        grade = classify_depreciation_mlp(metrics, mlp_model)
+    else:
+        grade = classify_depreciation(metrics["defect_index"])
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    return {
+        "timestamp": timestamp,
+        "grade": grade,
+        **metrics,
+        "defects": defects
+    }
+import torch.nn as nn
+
 class DepreciationMLP(nn.Module):
-    def __init__(self):
+    def __init__(self, input_dim=4, hidden_dim=16, output_dim=3):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(4, 16),
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(16, 8),
-            nn.ReLU(),
-            nn.Linear(8, 3)
+            nn.Linear(hidden_dim, output_dim)
         )
 
     def forward(self, x):
-        return self.net(x)
+        return self.model(x)
 
-# 主流程
-def main():
-    # 產生資料
-    data = generate_sample_data()
+def classify_depreciation_mlp(metrics, mlp_model):
+    """
+    使用 MLP 模型根據缺陷指標預測折舊等級。
+    🔢 輸入：metrics dict（包含 defect_index、avg_depth、max_depth、total_area）
+    🔁 回傳：折舊等級字串
+    """
+    input_tensor = torch.tensor([
+        metrics["defect_index"],
+        metrics["avg_depth"],
+        metrics["max_depth"],
+        metrics["total_area"]
+    ], dtype=torch.float32).unsqueeze(0)
 
-    # 資料轉 tensor
-    X = torch.tensor(data[["defect_index", "avg_depth", "max_depth", "total_area"]].values, dtype=torch.float32)
-    y = torch.tensor(data["label"].values, dtype=torch.long)
+    with torch.no_grad():
+        logits = mlp_model(input_tensor)
+        pred = torch.argmax(logits, dim=1).item()
 
-    # 建立 DataLoader
-    dataset = TensorDataset(X, y)
-    loader = DataLoader(dataset, batch_size=32, shuffle=True)
-
-    # 初始化模型與訓練元件
-    model = DepreciationMLP()
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
-
-    # 訓練迴圈
-    for epoch in range(50):
-        total_loss = 0
-        for batch_x, batch_y in loader:
-            optimizer.zero_grad()
-            logits = model(batch_x)
-            loss = criterion(logits, batch_y)
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-        print(f"Epoch {epoch+1:02d} | Loss: {total_loss:.4f}")
-
-    # 儲存模型
-    torch.save(model, "depreciation_mlp.pth")
-    print("✅ 模型已儲存為 depreciation_mlp.pth")
-
-if __name__ == "__main__":
-    main()
+    return ["A - 正常", "B - 觀察中", "C - 建議維修"][pred]

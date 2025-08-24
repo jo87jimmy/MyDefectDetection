@@ -3,10 +3,7 @@ import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter
 import torch.nn.functional as F
-from depreciation_analysis import generate_depreciation_record
-from train_depreciation_mlp import train_mlp_from_csv
-
-from train_depreciation_mlp import DepreciationMLP  # 先把 class 匯入
+from train_depreciation_mlp import DepreciationMLP,train_mlp_from_csv,generate_depreciation_record  # 先把 class 匯入
 class FullModel(torch.nn.Module):
     def __init__(self, encoder, bn, decoder):
         super().__init__()
@@ -218,6 +215,7 @@ if __name__ == "__main__":
     if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:
         train_mlp_from_csv()
     print("✅ 已重新訓練 MLP 模型")
+
     # ✅ 把 DepreciationMLP 加進 PyTorch 安全清單
     mlp_model = safe_load(
         "depreciation_mlp.pth",
@@ -225,19 +223,16 @@ if __name__ == "__main__":
         weights_only=True,
         extra_globals=[DepreciationMLP]  # 先加自己的模型 class
     )
-    # torch.serialization.add_safe_globals([DepreciationMLP,set])
-    # 載入 MLP 模型（需事先訓練好並儲存）
-    # mlp_model = torch.load("depreciation_mlp.pth", map_location=device,weights_only=True)
     mlp_model.eval()
 
     # 折舊分析（使用 MLP）
     record = generate_depreciation_record(defects, mlp_model=mlp_model)
     # ✅ 印出完整折舊分析紀錄（含 MLP 等級）
-print("\n📊 折舊分析紀錄（使用 MLP 模型）")
-for key, value in record.items():
-    if key != "defects":
-        print(f"{key}: {value}")
-    else:
-        print(f"{key}:")
-        for i, defect in enumerate(value):
-            print(f"  🔧 缺陷 {i+1}: 面積={defect['area']:.1f}, 中心={defect['center']}, 長寬={defect['size']}, 深度={defect['depth']:.3f}")
+    print("\n📊 折舊分析紀錄（使用 MLP 模型）")
+    for key, value in record.items():
+        if key != "defects":
+            print(f"{key}: {value}")
+        else:
+            print(f"{key}:")
+            for i, defect in enumerate(value):
+                print(f"  🔧 缺陷 {i+1}: 面積={defect['area']:.1f}, 中心={defect['center']}, 長寬={defect['size']}, 深度={defect['depth']:.3f}")
