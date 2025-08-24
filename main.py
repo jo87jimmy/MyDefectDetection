@@ -191,80 +191,151 @@ def safe_load(path, map_location="cpu", weights_only=True, extra_globals=None):
                     raise # 丟出例外，終止載入流程
             else:
                 raise  # 不是 Unsupported global 就直接丟出
-
+import argparse
 # ===== 主程式 =====
 if __name__ == "__main__":  # 判斷是否為主程式執行（避免被其他模組匯入時執行）
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--category', default='bottle', type=str)  # 訓練類別
+    args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"  # 根據環境選擇 GPU 或 CPU 裝置
     # 1. 載入完整模型（需使用 torch.save(model) 儲存的模型）
     model = torch.load("fullmodel_wres50_bottle.pth", map_location=device, weights_only=False)
     model.to(device).eval()  # 移至指定裝置並設為推論模式
-    # 2. 讀取單張測試影像
-    img_bgr = cv2.imread("test_bottle.png")  # 以 BGR 格式讀入影像
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)  # 轉換為 RGB 格式
-    img_resized = cv2.resize(img_rgb, (256, 256))  # 調整尺寸為 256x256
-    img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0  # 轉為 PyTorch 張量並正規化
-    img_tensor = img_tensor.to(device)  # 移至指定裝置
-    # 3. 模型推論：取得特徵與重建結果
-    with torch.no_grad():  # 停用梯度計算（加速推論）
-        feats, recons = model(img_tensor)  # 執行 forward，取得特徵與重建影像
-        anomaly_map, _ = cal_anomaly_map([feats[-1]], [recons[-1]], img_tensor.shape[-1])  # 計算 anomaly map
-        anomaly_map = gaussian_filter(anomaly_map, sigma=4)  # 套用高斯模糊平滑結果
-        ano_map_norm = min_max_norm(anomaly_map) * 255  # 正規化並轉為 0~255 範圍
-        ano_map_color = cvt2heatmap(ano_map_norm)  # 轉為彩色熱力圖
-    # 4. 疊加熱力圖至原始影像
-    overlay = show_cam_on_image(img_resized, ano_map_color)
-    # 5. 儲存疊圖結果
-    cv2.imwrite("heatmap_overlay.png", cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
-    print("✅ 單張影像缺陷熱力圖已完成 → heatmap_overlay.png")
-    # 6. 缺陷區域分析與標註
-    defects = extract_defect_regions(anomaly_map, threshold=0.8)  # 偵測缺陷區域
-    for i, d in enumerate(defects):  # 印出每個缺陷的資訊
-        print(f"🔧 缺陷 {i+1}: 面積={d['area']:.1f}, 中心={d['center']}, 長寬={d['size']}, 深度={d['depth']:.3f}")
-    annotated_img = extract_and_annotate_defects(img_resized, anomaly_map, threshold=0.8)  # 標註缺陷區域
-    cv2.imwrite("heatmap_annotated.png", cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR))
-    print("📌 缺陷區域已標註 → heatmap_annotated.png")
-    # 7. 折舊分析（使用 rule-based 分級）
-    record = generate_depreciation_record(defects)
-    print(f"\n📊 折舊分析報告（{record['timestamp']}）")
-    print(f"等級：{record['grade']}")
-    print(f"缺陷數量：{record['defect_count']}")
-    print(f"總面積：{record['total_area']:.1f}")
-    print(f"平均深度：{record['avg_depth']:.2f}")
-    print(f"最大深度：{record['max_depth']:.2f}")
-    print(f"折舊指數：{record['defect_index']:.2f}")
-    # 8. 儲存紀錄至 CSV 檔案
-    save_record_to_csv(record)
-    print("✅ 已儲存紀錄至 CSV")
-    # 9. 訓練 MLP 模型（可依紀錄數量條件觸發）
-    if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:  # 每新增 1 筆就 retrain（可調整條件）
-        train_mlp_from_csv()
-    print("✅ 已重新訓練 MLP 模型")
-    # 10. 載入 MLP 模型（使用 safe_load 確保安全）
-    mlp_model = safe_load(
-        "depreciation_mlp.pth",
-        map_location=device,
-        weights_only=True,
-        extra_globals=[DepreciationMLP]  # 加入自訂類別至安全清單
-    )
-    mlp_model.eval()  # 設為推論模式
-    # 11. 使用 MLP 模型進行折舊分析
-    record = generate_depreciation_record(defects, mlp_model=mlp_model)
-    print("\n📊 折舊分析紀錄（使用 MLP 模型）")
+    test_path = './mvtec/' + args.category + '/test' # 測試資料路徑
+    items = ['good', 'broken_large', 'broken_small', 'contamination'] # 測試資料標籤
+    print(f"🔍 測試資料夾：{test_path}，共 {len(items)} 類別")
 
-    for key, value in record.items():
-        if key == "defects":
-            print(f"{key}:")  # 印出缺陷清單
-            for i, defect in enumerate(value):
-                print(f"  🔧 缺陷 {i+1}: 面積={defect['area']:.1f}, 中心={defect['center']}, 長寬={defect['size']}, 深度={defect['depth']:.3f}")
-        elif key == "confidence":
-            print(f"{key}: {value:.2f}")  # 印出信心分數（保留兩位小數）
-        else:
-            print(f"{key}: {value}")  # 印出其他分析指標
+# 依類別逐張讀取影像並執行推論
+for item in items:
+    item_path = os.path.join(test_path, item)
+    img_files = [f for f in os.listdir(item_path) if f.endswith('.png') or f.endswith('.jpg')]
 
-    # 12. 儲存紀錄至 CSV 檔案
-    save_record_to_csv(record)
-    print("✅ 已儲存紀錄至 CSV")
-    # 13. 訓練 MLP 模型（可依紀錄數量條件觸發）
-    if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:  # 每新增 1 筆就 retrain（可調整條件）
-        train_mlp_from_csv()        
-    print("✅ 已完成 MLP 折舊分析")
+    print(f"\n📂 類別：{item}，共 {len(img_files)} 張影像")
+
+    for img_name in img_files:
+        img_path = os.path.join(item_path, img_name)
+        print(f"\n🖼️ 處理影像：{img_path}")
+
+        # 讀取與預處理影像
+        img_bgr = cv2.imread(img_path)
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img_rgb, (256, 256))
+        img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0
+        img_tensor = img_tensor.to(device)
+
+        # 模型推論
+        with torch.no_grad():
+            feats, recons = model(img_tensor)
+            anomaly_map, _ = cal_anomaly_map([feats[-1]], [recons[-1]], img_tensor.shape[-1])
+            anomaly_map = gaussian_filter(anomaly_map, sigma=4)
+            ano_map_norm = min_max_norm(anomaly_map) * 255
+            ano_map_color = cvt2heatmap(ano_map_norm)
+
+        # 疊加熱力圖
+        overlay = show_cam_on_image(img_resized, ano_map_color)
+        overlay_path = f"results/{item}_{img_name}_overlay.png"
+        cv2.imwrite(overlay_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+        print(f"✅ 熱力圖已儲存 → {overlay_path}")
+
+        # 缺陷分析與標註
+        defects = extract_defect_regions(anomaly_map, threshold=0.8)
+        for i, d in enumerate(defects):
+            print(f"🔧 缺陷 {i+1}: 面積={d['area']:.1f}, 中心={d['center']}, 長寬={d['size']}, 深度={d['depth']:.3f}")
+
+        annotated_img = extract_and_annotate_defects(img_resized, anomaly_map, threshold=0.8)
+        annotated_path = f"results/{item}_{img_name}_annotated.png"
+        cv2.imwrite(annotated_path, cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR))
+        print(f"📌 缺陷標註已儲存 → {annotated_path}")
+
+        # 折舊分析與紀錄
+        record = generate_depreciation_record(defects)
+        save_record_to_csv(record)
+
+        # MLP 模型分析（可依紀錄數量條件觸發），retrain 條件可依需求調整
+        # 如果有模型depreciation_mlp.pth 則載入繼續訓練，沒有則新建模型
+        if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:
+            train_mlp_from_csv()
+
+        # 使用 MLP 模型分析
+        # 10. 載入 MLP 模型（使用 state_dict 載入權重）
+        mlp_model = DepreciationMLP()  # 建立模型架構
+        mlp_model.load_state_dict(torch.load("depreciation_mlp.pth", map_location=device ,weights_only=True))  # 載入權重
+        mlp_model.eval()  # 設為推論模式式
+
+        record = generate_depreciation_record(defects, mlp_model=mlp_model)
+        save_record_to_csv(record)
+        print("📊 已完成 MLP 折舊分析並儲存紀錄")
+
+
+
+
+    # # 2. 讀取單張測試影像
+    # img_bgr = cv2.imread("test_bottle.png")  # 以 BGR 格式讀入影像
+    # img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)  # 轉換為 RGB 格式
+    # img_resized = cv2.resize(img_rgb, (256, 256))  # 調整尺寸為 256x256
+    # img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0  # 轉為 PyTorch 張量並正規化
+    # img_tensor = img_tensor.to(device)  # 移至指定裝置
+    # # 3. 模型推論：取得特徵與重建結果
+    # with torch.no_grad():  # 停用梯度計算（加速推論）
+    #     feats, recons = model(img_tensor)  # 執行 forward，取得特徵與重建影像
+    #     anomaly_map, _ = cal_anomaly_map([feats[-1]], [recons[-1]], img_tensor.shape[-1])  # 計算 anomaly map
+    #     anomaly_map = gaussian_filter(anomaly_map, sigma=4)  # 套用高斯模糊平滑結果
+    #     ano_map_norm = min_max_norm(anomaly_map) * 255  # 正規化並轉為 0~255 範圍
+    #     ano_map_color = cvt2heatmap(ano_map_norm)  # 轉為彩色熱力圖
+    # # 4. 疊加熱力圖至原始影像
+    # overlay = show_cam_on_image(img_resized, ano_map_color)
+    # # 5. 儲存疊圖結果
+    # cv2.imwrite("heatmap_overlay.png", cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+    # print("✅ 單張影像缺陷熱力圖已完成 → heatmap_overlay.png")
+    # # 6. 缺陷區域分析與標註
+    # defects = extract_defect_regions(anomaly_map, threshold=0.8)  # 偵測缺陷區域
+    # for i, d in enumerate(defects):  # 印出每個缺陷的資訊
+    #     print(f"🔧 缺陷 {i+1}: 面積={d['area']:.1f}, 中心={d['center']}, 長寬={d['size']}, 深度={d['depth']:.3f}")
+    # annotated_img = extract_and_annotate_defects(img_resized, anomaly_map, threshold=0.8)  # 標註缺陷區域
+    # cv2.imwrite("heatmap_annotated.png", cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR))
+    # print("📌 缺陷區域已標註 → heatmap_annotated.png")
+    # # 7. 折舊分析（使用 rule-based 分級）
+    # record = generate_depreciation_record(defects)
+    # print(f"\n📊 折舊分析報告（{record['timestamp']}）")
+    # print(f"等級：{record['grade']}")
+    # print(f"缺陷數量：{record['defect_count']}")
+    # print(f"總面積：{record['total_area']:.1f}")
+    # print(f"平均深度：{record['avg_depth']:.2f}")
+    # print(f"最大深度：{record['max_depth']:.2f}")
+    # print(f"折舊指數：{record['defect_index']:.2f}")
+    # # 8. 儲存紀錄至 CSV 檔案
+    # save_record_to_csv(record)
+    # print("✅ 已儲存紀錄至 CSV")
+    # # 9. 訓練 MLP 模型（可依紀錄數量條件觸發）
+    # if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:  # 每新增 1 筆就 retrain（可調整條件）
+    #     train_mlp_from_csv()
+    # print("✅ 已重新訓練 MLP 模型")
+    # # 10. 載入 MLP 模型（使用 safe_load 確保安全）
+    # mlp_model = safe_load(
+    #     "depreciation_mlp.pth",
+    #     map_location=device,
+    #     weights_only=True,
+    #     extra_globals=[DepreciationMLP]  # 加入自訂類別至安全清單
+    # )
+    # mlp_model.eval()  # 設為推論模式
+    # # 11. 使用 MLP 模型進行折舊分析
+    # record = generate_depreciation_record(defects, mlp_model=mlp_model)
+    # print("\n📊 折舊分析紀錄（使用 MLP 模型）")
+
+    # for key, value in record.items():
+    #     if key == "defects":
+    #         print(f"{key}:")  # 印出缺陷清單
+    #         for i, defect in enumerate(value):
+    #             print(f"  🔧 缺陷 {i+1}: 面積={defect['area']:.1f}, 中心={defect['center']}, 長寬={defect['size']}, 深度={defect['depth']:.3f}")
+    #     elif key == "confidence":
+    #         print(f"{key}: {value:.2f}")  # 印出信心分數（保留兩位小數）
+    #     else:
+    #         print(f"{key}: {value}")  # 印出其他分析指標
+
+    # # 12. 儲存紀錄至 CSV 檔案
+    # save_record_to_csv(record)
+    # print("✅ 已儲存紀錄至 CSV")
+    # # 13. 訓練 MLP 模型（可依紀錄數量條件觸發）
+    # if len(pd.read_csv("depreciation_records.csv")) % 1 == 0:  # 每新增 1 筆就 retrain（可調整條件）
+    #     train_mlp_from_csv()        
+    # print("✅ 已完成 MLP 折舊分析")

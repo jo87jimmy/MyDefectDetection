@@ -3,37 +3,81 @@ import torch.nn as nn
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import os
+# def train_mlp_from_csv(csv_path="depreciation_records.csv", output_path="depreciation_mlp.pth"):
+#     """
+#     負責從 CSV 資料訓練折舊分析用的 MLP 模型，並儲存為 .pth 檔案
+#     訓練一個簡單的 MLP 模型來預測折舊等級。整體流程包含：
+#     資料讀取與轉換，模型建立與訓練，模型儲存與提示
+#     用於持續更新模型的場景，例如每新增 N 筆紀錄就 retrain。
+#     todo:
+#     模型評估(accuracy、confusion matrix)
+#     early stopping 或 learning rate scheduler，多層架構或 dropout   
+#     """
+#     df = pd.read_csv(csv_path)  # 從 CSV 檔案讀取折舊紀錄資料
+#     # 🔢 特徵與標籤準備
+#     X = torch.tensor(df[["defect_index", "avg_depth", "max_depth", "total_area"]].values, dtype=torch.float32)  # 取出四個指標作為輸入特徵
+#     y = torch.tensor(df["grade"].map({"A - 正常": 0, "B - 觀察中": 1, "C - 建議維修": 2}).values, dtype=torch.long)  # 將等級轉為數值標籤
+#     # 📦 建立資料集與 DataLoader
+#     dataset = torch.utils.data.TensorDataset(X, y)  # 將特徵與標籤打包成 PyTorch 資料集
+#     loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)  # 建立資料載入器，批次大小為 32，並打亂順序
+#     # 🧠 建立模型與訓練元件
+#     model = DepreciationMLP()  # 建立 MLP 模型（使用預設架構）
+#     criterion = nn.CrossEntropyLoss()  # 使用交叉熵作為分類損失函式
+#     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)  # 使用 Adam 優化器，學習率為 0.01
+#     # 🔁 模型訓練迴圈
+#     for epoch in range(50):  # 訓練 50 個 epoch
+#         for batch_x, batch_y in loader:  # 遍歷每個批次
+#             optimizer.zero_grad()  # 清除前一次的梯度
+#             logits = model(batch_x)  # 前向傳播，取得預測結果
+#             loss = criterion(logits, batch_y)  # 計算損失
+#             loss.backward()  # 反向傳播
+#             optimizer.step()  # 更新模型參數
+#     torch.save(model, output_path)  # 儲存訓練完成的模型至指定路徑
+#     print(f"✅ 模型已訓練並儲存至 {output_path}")  # 顯示訓練完成訊息
+
 def train_mlp_from_csv(csv_path="depreciation_records.csv", output_path="depreciation_mlp.pth"):
     """
-    負責從 CSV 資料訓練折舊分析用的 MLP 模型，並儲存為 .pth 檔案
-    訓練一個簡單的 MLP 模型來預測折舊等級。整體流程包含：
-    資料讀取與轉換，模型建立與訓練，模型儲存與提示
-    用於持續更新模型的場景，例如每新增 N 筆紀錄就 retrain。
-    todo:
-    模型評估(accuracy、confusion matrix)
-    early stopping 或 learning rate scheduler，多層架構或 dropout   
+    從 CSV 資料訓練或微調折舊分析用的 MLP 模型，並儲存為 .pth 檔案。
+    若模型已存在，則載入並繼續訓練；否則新建模型。
     """
-    df = pd.read_csv(csv_path)  # 從 CSV 檔案讀取折舊紀錄資料
-    # 🔢 特徵與標籤準備
-    X = torch.tensor(df[["defect_index", "avg_depth", "max_depth", "total_area"]].values, dtype=torch.float32)  # 取出四個指標作為輸入特徵
-    y = torch.tensor(df["grade"].map({"A - 正常": 0, "B - 觀察中": 1, "C - 建議維修": 2}).values, dtype=torch.long)  # 將等級轉為數值標籤
+
+    # 📥 讀取資料
+    df = pd.read_csv(csv_path)
+    X = torch.tensor(df[["defect_index", "avg_depth", "max_depth", "total_area"]].values, dtype=torch.float32)
+    y = torch.tensor(df["grade"].map({"A - 正常": 0, "B - 觀察中": 1, "C - 建議維修": 2}).values, dtype=torch.long)
+
     # 📦 建立資料集與 DataLoader
-    dataset = torch.utils.data.TensorDataset(X, y)  # 將特徵與標籤打包成 PyTorch 資料集
-    loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)  # 建立資料載入器，批次大小為 32，並打亂順序
-    # 🧠 建立模型與訓練元件
-    model = DepreciationMLP()  # 建立 MLP 模型（使用預設架構）
-    criterion = nn.CrossEntropyLoss()  # 使用交叉熵作為分類損失函式
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)  # 使用 Adam 優化器，學習率為 0.01
+    dataset = torch.utils.data.TensorDataset(X, y)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
+
+    # 🧠 模型建立或載入
+    model = DepreciationMLP()
+    if os.path.exists(output_path):
+        print(f"📂 偵測到已存在模型 {output_path}，將載入並繼續訓練")
+        model.load_state_dict(torch.load(output_path,weights_only=True))  # 載入權重
+    #     model = torch.load(output_path, weights_only=True)
+    # else:
+    #     print("🆕 未偵測到模型，建立新模型進行訓練")
+    #     model = DepreciationMLP()
+
+    # ⚙️ 訓練元件設定
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
     # 🔁 模型訓練迴圈
-    for epoch in range(50):  # 訓練 50 個 epoch
-        for batch_x, batch_y in loader:  # 遍歷每個批次
-            optimizer.zero_grad()  # 清除前一次的梯度
-            logits = model(batch_x)  # 前向傳播，取得預測結果
-            loss = criterion(logits, batch_y)  # 計算損失
-            loss.backward()  # 反向傳播
-            optimizer.step()  # 更新模型參數
-    torch.save(model, output_path)  # 儲存訓練完成的模型至指定路徑
-    print(f"✅ 模型已訓練並儲存至 {output_path}")  # 顯示訓練完成訊息
+    for epoch in range(50):
+        for batch_x, batch_y in loader:
+            optimizer.zero_grad()
+            logits = model(batch_x)
+            loss = criterion(logits, batch_y)
+            loss.backward()
+            optimizer.step()
+
+    # 💾 儲存模型
+    # torch.save(model, output_path)
+    torch.save(model.state_dict(), output_path)  # 只儲存權重
+    print(f"✅ 模型已訓練並儲存至 {output_path}")
 
 def compute_depreciation_metrics(defects):
     """
