@@ -357,93 +357,93 @@ for item in items:
 
     print(f"\n📂 類別：{item}，共 {len(img_files)} 張影像")
 
-for img_name in img_files:  
-    img_path = os.path.join(item_path, img_name)  
-    print(f"\n🖼️ 處理影像：{img_path}")  
-  
-    # 原有的影像預處理和模型推論保持不變  
-    img_bgr = cv2.imread(img_path)  
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)  
-    img_resized = cv2.resize(img_rgb, (256, 256))  
-    img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0  
-    img_tensor = img_tensor.to(device)  
-  
-    # 模型推論  
-    with torch.no_grad():  
-        feats, recons = model(img_tensor)  
-        anomaly_map, _ = cal_anomaly_map([feats[-1]], [recons[-1]], img_tensor.shape[-1])  
-        anomaly_map = gaussian_filter(anomaly_map, sigma=4)  
-  
-    # 原有的視覺化輸出保持不變  
-    ano_map_norm = min_max_norm(anomaly_map) * 255  
-    ano_map_color = cvt2heatmap(ano_map_norm)  
-    overlay = show_cam_on_image(img_resized, ano_map_color)  
-    overlay_path = f"results/{item}_{img_name}_overlay.png"  
-    cv2.imwrite(overlay_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))  
-  
-    # 缺陷提取  
-    defects = extract_defect_regions(anomaly_map, threshold=0.8)  
-    # === 改良版折舊分析開始 ===  
-    # 載入改良版組件  
-    enhanced_mlp_model = None  
-    scaler = None  
-      
-    # 嘗試載入標準化器  
-    if os.path.exists("feature_scaler.pkl"):  
-        with open("feature_scaler.pkl", 'rb') as f:  
-            scaler = pickle.load(f)  
-      
-    # 嘗試載入改良版模型  
-    if os.path.exists("enhanced_depreciation_mlp.pth") and scaler:  
+    for img_name in img_files:  
+        img_path = os.path.join(item_path, img_name)  
+        print(f"\n🖼️ 處理影像：{img_path}")  
+    
+        # 原有的影像預處理和模型推論保持不變  
+        img_bgr = cv2.imread(img_path)  
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)  
+        img_resized = cv2.resize(img_rgb, (256, 256))  
+        img_tensor = torch.from_numpy(img_resized).permute(2, 0, 1).float().unsqueeze(0) / 255.0  
+        img_tensor = img_tensor.to(device)  
+    
+        # 模型推論  
+        with torch.no_grad():  
+            feats, recons = model(img_tensor)  
+            anomaly_map, _ = cal_anomaly_map([feats[-1]], [recons[-1]], img_tensor.shape[-1])  
+            anomaly_map = gaussian_filter(anomaly_map, sigma=4)  
+    
+        # 原有的視覺化輸出保持不變  
+        ano_map_norm = min_max_norm(anomaly_map) * 255  
+        ano_map_color = cvt2heatmap(ano_map_norm)  
+        overlay = show_cam_on_image(img_resized, ano_map_color)  
+        overlay_path = f"results/{item}_{img_name}_overlay.png"  
+        cv2.imwrite(overlay_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))  
+    
+        # 缺陷提取  
+        defects = extract_defect_regions(anomaly_map, threshold=0.8)  
+        # === 改良版折舊分析開始 ===  
+        # 載入改良版組件  
+        enhanced_mlp_model = None  
+        scaler = None  
+        
+        # 嘗試載入標準化器  
+        if os.path.exists("feature_scaler.pkl"):  
+            with open("feature_scaler.pkl", 'rb') as f:  
+                scaler = pickle.load(f)  
+        
+        # 嘗試載入改良版模型  
+        if os.path.exists("enhanced_depreciation_mlp.pth") and scaler:  
+            try:  
+                # 檢查 scaler 的特徵數量來決定模型輸入維度  
+                scaler_features = scaler.n_features_in_  
+                enhanced_mlp_model = EnhancedDepreciationMLP(input_dim=scaler_features)  
+                enhanced_mlp_model.load_state_dict(torch.load("enhanced_depreciation_mlp.pth", weights_only=True))  
+                enhanced_mlp_model.eval()  
+                print(f"📂 已載入改良版 MLP 模型 (特徵數: {scaler_features})")  
+            except Exception as e:  
+                print(f"⚠️ 載入改良版模型失敗: {e}")  
+                enhanced_mlp_model = None
+        
+        # 使用改良版分析（如果可用）  
+        if enhanced_mlp_model and scaler:  
+            record = generate_enhanced_depreciation_record(  
+                defects, enhanced_mlp_model, scaler, image_shape=(256, 256)  
+            )  
+            print(f"📊 改良版 MLP 分析 - 等級: {record['grade']}, "  
+                f"信心: {record['confidence']:.3f}, 不確定性: {record['uncertainty']:.3f}")  
+        else:  
+            # 回退到原始方法  
+            record = generate_depreciation_record(defects)  
+            print(f"📊 規則式分析 - 等級: {record['grade']}")  
+        
+        # 儲存記錄  
+        save_record_to_csv(record)  
+        
+        # 改良版重訓練條件  
         try:  
-            # 檢查 scaler 的特徵數量來決定模型輸入維度  
-            scaler_features = scaler.n_features_in_  
-            enhanced_mlp_model = EnhancedDepreciationMLP(input_dim=scaler_features)  
-            enhanced_mlp_model.load_state_dict(torch.load("enhanced_depreciation_mlp.pth", weights_only=True))  
-            enhanced_mlp_model.eval()  
-            print(f"📂 已載入改良版 MLP 模型 (特徵數: {scaler_features})")  
-        except Exception as e:  
-            print(f"⚠️ 載入改良版模型失敗: {e}")  
-            enhanced_mlp_model = None
-      
-    # 使用改良版分析（如果可用）  
-    if enhanced_mlp_model and scaler:  
-        record = generate_enhanced_depreciation_record(  
-            defects, enhanced_mlp_model, scaler, image_shape=(256, 256)  
-        )  
-        print(f"📊 改良版 MLP 分析 - 等級: {record['grade']}, "  
-              f"信心: {record['confidence']:.3f}, 不確定性: {record['uncertainty']:.3f}")  
-    else:  
-        # 回退到原始方法  
-        record = generate_depreciation_record(defects)  
-        print(f"📊 規則式分析 - 等級: {record['grade']}")  
-      
-    # 儲存記錄  
-    save_record_to_csv(record)  
-      
-    # 改良版重訓練條件  
-    try:  
-        # 嘗試讀取 CSV，如果失敗則清理後重試  
-        df = pd.read_csv("depreciation_records.csv")  
-    except pd.errors.ParserError as e:  
-        print(f"⚠️ CSV 檔案格式錯誤: {e}")  
-        print("🔧 嘗試修復 CSV 檔案...")  
-        
-        # 備份原檔案  
-        import shutil  
-        shutil.copy("depreciation_records.csv", "depreciation_records_backup.csv")  
-        
-        # 重新建立乾淨的 CSV  
-        clean_csv_file("depreciation_records.csv")  
-        
-        # 重新讀取  
-        try:  
+            # 嘗試讀取 CSV，如果失敗則清理後重試  
             df = pd.read_csv("depreciation_records.csv")  
-            print("✅ CSV 檔案已修復")  
-        except Exception as e2:  
-            print(f"❌ 無法修復 CSV 檔案: {e2}")  
-            # 建立空的 DataFrame 繼續執行  
-            df = pd.DataFrame()
+        except pd.errors.ParserError as e:  
+            print(f"⚠️ CSV 檔案格式錯誤: {e}")  
+            print("🔧 嘗試修復 CSV 檔案...")  
+            
+            # 備份原檔案  
+            import shutil  
+            shutil.copy("depreciation_records.csv", "depreciation_records_backup.csv")  
+            
+            # 重新建立乾淨的 CSV  
+            clean_csv_file("depreciation_records.csv")  
+            
+            # 重新讀取  
+            try:  
+                df = pd.read_csv("depreciation_records.csv")  
+                print("✅ CSV 檔案已修復")  
+            except Exception as e2:  
+                print(f"❌ 無法修復 CSV 檔案: {e2}")  
+                # 建立空的 DataFrame 繼續執行  
+                df = pd.DataFrame()
 
     # for img_name in img_files:
     #     img_path = os.path.join(item_path, img_name)
