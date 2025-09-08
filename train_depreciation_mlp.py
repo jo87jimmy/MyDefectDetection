@@ -99,6 +99,10 @@ def classify_depreciation(defect_index):
         其他考慮的方案：
         標準差法：A<2971, B<6225, C≥6225
         保守法：A<4631, B<6741, C≥6741 """
+    """"雖然規則式分類在初期很實用，但隨著數據累積，
+    機器學習方法通常能提供更好的分類準確性和適應性。
+    MyDefectDetection 系統的混合架構設計體現了這種漸進式改進的最佳實踐。"""
+    
     if defect_index < 3876:
         return "A - normal"
     elif defect_index < 5554:
