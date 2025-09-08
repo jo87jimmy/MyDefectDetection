@@ -75,6 +75,7 @@ def extract_defect_regions(anomaly_map, threshold=0.6):
     中心點（最深點）
     寬高（bounding box）
     深度（最大 anomaly 值）
+    輪廓（contour）
     後續的折舊分析模組使用，來評估物件的健康狀態與維修建議。 """
     norm_map = min_max_norm(anomaly_map)  # 將 anomaly map 正規化到 0~1 範圍
     binary_mask = (norm_map > threshold).astype(np.uint8)  # 根據門檻值建立二值遮罩（1 表示異常）
@@ -96,7 +97,8 @@ def extract_defect_regions(anomaly_map, threshold=0.6):
         "area": float(area),  # 確保是 Python float
         "center": (int(cx), int(cy)),  # 確保是 Python int
         "size": (int(w), int(h)),  # 確保是 Python int
-        "depth": float(depth)  # 確保是 Python float
+        "depth": float(depth),  # 確保是 Python float
+        "contour": cnt  # 將輪廓一併回傳
         })
     return defects  # 回傳所有缺陷資訊列表
 
@@ -109,33 +111,43 @@ def extract_and_annotate_defects(img, anomaly_map, threshold=0.6):
     畫出紅色小圓點作為視覺焦點
     適合用於報表、GUI、dashboard 顯示，以掌握缺陷位置與嚴重程度。
     """
-    smoothed_map = cv2.GaussianBlur(anomaly_map, (5, 5), sigmaX=2)  # 對 anomaly map 套用高斯模糊，平滑邊緣
-    norm_map = min_max_norm(smoothed_map)  # 將模糊後的 anomaly map 正規化到 0~1
-    binary_mask = (norm_map > threshold).astype(np.uint8) * 255  # 根據門檻值建立二值遮罩（255 表示異常區域）
-    contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # 找出所有外部輪廓（缺陷區域）
+    # 為了讓視覺化輪廓更平滑，對 anomaly map 進行高斯模糊。
+    # 這一步驟不影響核心數據（如深度）的準確性。
+    smoothed_map = cv2.GaussianBlur(anomaly_map, (5, 5), sigmaX=2)
+
+    # 直接呼叫核心函式來提取所有缺陷的詳細資訊
+    # 我們傳入平滑後的 map，以獲得與視覺上一致的輪廓
+    defects = extract_defect_regions(smoothed_map, threshold)
+
     annotated = img.copy()  # 建立影像副本，用來繪製標註
-    for i, cnt in enumerate(contours):  # 遍歷每個輪廓
-        area = cv2.contourArea(cnt)  # 計算輪廓面積
-        if area < 10:  # 忽略太小的區域（可能是雜訊）
-            continue
-        # 建立遮罩並找出 anomaly map 中該區域最深的點（最大值）
-        mask = np.zeros_like(anomaly_map, dtype=np.uint8)  # 建立與 anomaly map 同大小的遮罩
-        cv2.drawContours(mask, [cnt], -1, 1, -1)  # 將輪廓填滿在遮罩上
-        masked_anomaly = np.where(mask == 1, anomaly_map, -np.inf)  # 只保留遮罩內的 anomaly 值，其餘設為 -∞
-        max_idx = np.unravel_index(np.argmax(masked_anomaly), anomaly_map.shape)  # 找出最大值的位置（最深點）
-        cx, cy = max_idx[1], max_idx[0]  # OpenCV 座標順序為 (x, y)，所以要反轉
-        depth = anomaly_map[max_idx]  # 取得最深點的 anomaly 值（代表缺陷深度）
+
+    # 遍歷所有偵測到的缺陷，並在影像上進行標註
+    for i, defect in enumerate(defects):
+        # 從 defect 物件中直接取得所需資訊
+        cnt = defect["contour"]
+        area = defect["area"]
+        cx, cy = defect["center"]
+        
+        # 為了數據的精準度，深度值應從「原始」的 anomaly_map 中獲取，
+        # 因為 smoothed_map 的數值可能因模糊而略微降低。
+        depth = anomaly_map[cy, cx]
+
         # 🔸 畫出不規則邊界（藍色）
         cv2.drawContours(annotated, [cnt], -1, (255, 0, 0), 1)
+
         # 🔸 在最深點標註文字（紅色）
-        label1 = f"#{i+1}"  # 缺陷編號
-        label2 = f"a:{int(area)}"  # 面積
-        label3 = f"d:{depth:.2f}"  # 深度
-        line_height = 8  # 每行文字的垂直間距（可微調）
+        label1 = f"#{i+1}"          # 缺陷編號
+        label2 = f"a:{int(area)}"   # 面積
+        label3 = f"d:{depth:.2f}"   # 深度 (使用原始深度)
+        line_height = 8             # 每行文字的垂直間距
+
         cv2.putText(annotated, label1, (cx, cy - line_height * 2), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 255), 1)
         cv2.putText(annotated, label2, (cx, cy - line_height),     cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 255), 1)
         cv2.putText(annotated, label3, (cx, cy),                   cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 255), 1)
-        cv2.circle(annotated, (cx, cy), 1, (255, 0, 0), -1)  # 在最深點畫紅色小圓點
+
+        # 🔸 在最深點畫紅色小圓點作為視覺焦點
+        cv2.circle(annotated, (cx, cy), 1, (255, 0, 0), -1)
+
     return annotated  # 回傳已標註的影像
 
 import pandas as pd
@@ -383,6 +395,14 @@ for item in items:
 
         # 缺陷提取
         defects = extract_defect_regions(anomaly_map, threshold=0.8)
+        for i, d in enumerate(defects):
+            print(f"🔧 缺陷 {i+1}: 面積={d['area']:.1f}, 中心={d['center']}, 長寬={d['size']}, 深度={d['depth']:.3f}")
+
+        annotated_img = extract_and_annotate_defects(img_resized, anomaly_map, threshold=0.8)
+        annotated_path = f"results/{item}_{img_name}_annotated.png"
+        cv2.imwrite(annotated_path, cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR))
+        print(f"📌 缺陷標註已儲存 → {annotated_path}")
+
         # === 改良版折舊分析開始 ===
         # 載入改良版組件
         enhanced_mlp_model = None
@@ -406,7 +426,7 @@ for item in items:
                 print(f"⚠️ 載入改良版模型失敗: {e}")
                 enhanced_mlp_model = None
 
-        # 使用改良版分析（如果可用）
+        # 使用改良版分析
         record = generate_enhanced_depreciation_record(
             defects, enhanced_mlp_model, scaler, image_shape=(256, 256)
         )
