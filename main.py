@@ -444,6 +444,19 @@ for item in items:
                 print(f"❌ 無法修復 CSV 檔案: {e2}")
                 # 建立空的 DataFrame 繼續執行
                 df = pd.DataFrame()
+        # 在讀取 CSV 成功後加入重訓練邏輯  
+        if not df.empty:  
+            # 更智能的重訓練條件：至少50筆數據，每20筆重訓練一次  
+            if len(df) >= 50 and len(df) % 20 == 0:  
+                print("🔄 觸發改良版 MLP 重訓練...")  
+                try:  
+                    enhanced_mlp_model, scaler = train_enhanced_mlp_from_csv()  
+                    print("✅ 改良版 MLP 重訓練完成")  
+                except Exception as e:  
+                    print(f"⚠️ 重訓練失敗: {e}")
+
+
+
 
     # for img_name in img_files:
     #     img_path = os.path.join(item_path, img_name)
