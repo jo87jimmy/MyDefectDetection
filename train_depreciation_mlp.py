@@ -103,9 +103,9 @@ def classify_depreciation(defect_index):
     機器學習方法通常能提供更好的分類準確性和適應性。
     MyDefectDetection 系統的混合架構設計體現了這種漸進式改進的最佳實踐。"""
 
-    if defect_index < 3876:
+    if defect_index < 2000:
         return "A - normal"
-    elif defect_index < 5554:
+    elif defect_index < 3000:
         return "B - Under_observation"
     else:
         return "C - Recommended_repair"
