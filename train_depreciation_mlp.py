@@ -5,12 +5,12 @@ import numpy as np
 from datetime import datetime
 import os
 
-import torch.optim as optim  
-from torch.optim.lr_scheduler import ReduceLROnPlateau 
-from sklearn.model_selection import train_test_split  
-from sklearn.preprocessing import StandardScaler  
-from sklearn.utils.class_weight import compute_class_weight  
-import pickle  
+import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_class_weight
+import pickle
 def train_mlp_from_csv(csv_path="depreciation_records.csv", output_path="depreciation_mlp.pth"):
     """
     從 CSV 資料訓練或微調折舊分析用的 MLP 模型，並儲存為 .pth 檔案。
@@ -188,255 +188,296 @@ def classify_depreciation_mlp(metrics, mlp_model):
     # 決策支援：高信心可自動通過，低信心可轉人工複核
     return label[pred], confidence
 
-class EnhancedDepreciationMLP(nn.Module):  
-    """改良版折舊分析 MLP 模型  
-    - 更深的網路架構（3層隱藏層）  
-    - Dropout 防過擬合  
-    - BatchNorm 穩定訓練  
-    - 支援更多特徵輸入  
-    """  
-    def __init__(self, input_dim=8, hidden_dims=[64, 32, 16], output_dim=3, dropout_rate=0.3):  
-        super().__init__()  
-          
-        layers = []  
-        prev_dim = input_dim  
-          
-        # 建立多層隱藏層  
-        for hidden_dim in hidden_dims:  
-            layers.extend([  
-                nn.Linear(prev_dim, hidden_dim),  
-                nn.BatchNorm1d(hidden_dim),  
-                nn.LeakyReLU(0.1),  
-                nn.Dropout(dropout_rate)  
-            ])  
-            prev_dim = hidden_dim  
-          
-        # 輸出層  
-        layers.append(nn.Linear(prev_dim, output_dim))  
-          
-        self.model = nn.Sequential(*layers)  
-          
-    def forward(self, x):  
-        return self.model(x)  
-  
-def compute_enhanced_depreciation_metrics(defects, image_shape=(256, 256), use_basic_features_only=True):  
-    """計算增強版折舊指標，可選擇只使用基礎特徵"""  
-    if not defects:  
-        basic_metrics = {  
-            "defect_index": 0, "defect_count": 0, "avg_depth": 0, "max_depth": 0, "total_area": 0  
-        }  
-        if use_basic_features_only:  
-            return basic_metrics  
-        else:  
-            return {**basic_metrics, "depth_std": 0, "area_ratio": 0, "defect_density": 0}  
-      
-    # 基礎指標計算保持不變  
-    defect_index = sum([d['area'] * d['depth'] for d in defects])  
-    depths = [d['depth'] for d in defects]  
-    areas = [d['area'] for d in defects]  
-      
-    avg_depth = np.mean(depths)  
-    max_depth = np.max(depths)  
-    total_area = sum(areas)  
-      
-    basic_metrics = {  
-        "defect_index": defect_index,  
-        "defect_count": len(defects),  
-        "avg_depth": avg_depth,  
-        "max_depth": max_depth,  
-        "total_area": total_area  
-    }  
-      
-    if use_basic_features_only:  
-        return basic_metrics  
-      
-    # 額外特徵  
-    depth_std = np.std(depths) if len(depths) > 1 else 0  
-    total_image_area = image_shape[0] * image_shape[1]  
-    area_ratio = total_area / total_image_area  
-    defect_density = len(defects) / total_image_area * 10000  
-      
-    return {  
-        **basic_metrics,  
-        "depth_std": depth_std,  
-        "area_ratio": area_ratio,  
-        "defect_density": defect_density  
+class EnhancedDepreciationMLP(nn.Module):
+    """改良版折舊分析 MLP 模型
+    - 更深的網路架構（3層隱藏層）
+    - Dropout 防過擬合
+    - BatchNorm 穩定訓練
+    - 支援更多特徵輸入
+    """
+    def __init__(self, input_dim=8, hidden_dims=[64, 32, 16], output_dim=3, dropout_rate=0.3):
+        super().__init__()
+
+        layers = []
+        prev_dim = input_dim
+
+        # 建立多層隱藏層
+        for hidden_dim in hidden_dims:
+            layers.extend([
+                nn.Linear(prev_dim, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.LeakyReLU(0.1),
+                nn.Dropout(dropout_rate)
+            ])
+            prev_dim = hidden_dim
+
+        # 輸出層
+        layers.append(nn.Linear(prev_dim, output_dim))
+
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.model(x)
+
+def compute_enhanced_depreciation_metrics(defects, image_shape=(256, 256), use_basic_features_only=True):
+    """計算增強版折舊指標，可選擇只使用基礎特徵"""
+    # 檢查是否有缺陷資料，若無則回傳零值指標
+    if not defects:
+        # 建立基礎指標的零值字典
+        basic_metrics = {
+            "defect_index": 0, "defect_count": 0, "avg_depth": 0, "max_depth": 0, "total_area": 0
+        }
+        # 根據參數決定是否只回傳基礎特徵
+        if use_basic_features_only:
+            return basic_metrics
+        else:
+            # 回傳包含額外特徵的完整零值字典
+            return {**basic_metrics, "depth_std": 0, "area_ratio": 0, "defect_density": 0}
+
+    # 基礎指標計算保持不變 - 計算核心折舊指標
+    defect_index = sum([d['area'] * d['depth'] for d in defects])  # 計算折舊指數（面積×深度的總和）
+    depths = [d['depth'] for d in defects]  # 提取所有缺陷的深度值
+    areas = [d['area'] for d in defects]    # 提取所有缺陷的面積值
+
+    avg_depth = np.mean(depths)   # 計算平均深度
+    max_depth = np.max(depths)    # 找出最大深度
+    total_area = sum(areas)       # 計算總面積
+
+    # 組建基礎指標字典
+    basic_metrics = {
+        "defect_index": defect_index,    # 折舊指數
+        "defect_count": len(defects),    # 缺陷數量
+        "avg_depth": avg_depth,          # 平均深度
+        "max_depth": max_depth,          # 最大深度
+        "total_area": total_area         # 總面積
     }
-  
-def train_enhanced_mlp_from_csv(csv_path="depreciation_records.csv",   
-                               output_path="enhanced_depreciation_mlp.pth",  
-                               scaler_path="feature_scaler.pkl",  
-                               epochs=100, patience=10):  
-    """改良版 MLP 訓練函數  
-    - 數據標準化  
-    - 訓練/驗證分割  
-    - 早停機制  
-    - 學習率調度  
-    - 類別權重平衡  
-    """  
-      
-    # 讀取數據  
-    df = pd.read_csv(csv_path)  
-      
-    # 特徵選擇（支援更多特徵）  
-    feature_cols = ["defect_index", "avg_depth", "max_depth", "total_area"]  
-    if "depth_std" in df.columns:  
-        feature_cols.extend(["depth_std", "area_ratio", "defect_density"])  
-      
-    X = df[feature_cols].values  
-    y = df["grade"].map({"A - normal": 0, "B - Under_observation": 1, "C - Recommended_repair": 2}).values  
-      
-    # 數據標準化  
-    scaler = StandardScaler()  
-    X_scaled = scaler.fit_transform(X)  
-      
-    # 儲存標準化器  
-    with open(scaler_path, 'wb') as f:  
-        pickle.dump(scaler, f)  
-      
-    # 訓練/驗證分割  
-    X_train, X_val, y_train, y_val = train_test_split(  
-        X_scaled, y, test_size=0.2, random_state=42, stratify=y  
-    )  
-      
-    # 轉換為張量  
-    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)  
-    y_train_tensor = torch.tensor(y_train, dtype=torch.long)  
-    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)  
-    y_val_tensor = torch.tensor(y_val, dtype=torch.long)  
-      
-    # 計算類別權重  
-    class_weights = compute_class_weight('balanced', classes=np.unique(y), y=y)  
-    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)  
-      
-    # 建立模型  
-    model = EnhancedDepreciationMLP(input_dim=len(feature_cols))  
-      
-    # 載入已存在的模型（如果有）  
-    if os.path.exists(output_path):  
-        print(f"📂 載入已存在模型 {output_path}")  
-        model.load_state_dict(torch.load(output_path, weights_only=True))  
-      
-    # 訓練設定  
-    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)  
-    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)  
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)  
-      
-    # 早停設定  
-    best_val_loss = float('inf')  
-    patience_counter = 0  
-    best_model_state = None  
-      
-    # 訓練迴圈  
-    train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)  
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)  
-      
-    model.train()  
-    for epoch in range(epochs):  
-        # 訓練階段  
-        train_loss = 0  
-        for batch_x, batch_y in train_loader:  
-            optimizer.zero_grad()  
-            logits = model(batch_x)  
-            loss = criterion(logits, batch_y)  
-            loss.backward()  
-            optimizer.step()  
-            train_loss += loss.item()  
-          
-        # 驗證階段  
-        model.eval()  
-        with torch.no_grad():  
-            val_logits = model(X_val_tensor)  
-            val_loss = criterion(val_logits, y_val_tensor).item()  
-            val_acc = (torch.argmax(val_logits, dim=1) == y_val_tensor).float().mean().item()  
-          
-        # 學習率調度  
-        scheduler.step(val_loss)  
-          
-        # 早停檢查  
-        if val_loss < best_val_loss:  
-            best_val_loss = val_loss  
-            patience_counter = 0  
-            best_model_state = model.state_dict().copy()  
-        else:  
-            patience_counter += 1  
-          
-        if epoch % 10 == 0:  
-            print(f"Epoch {epoch}: Train Loss={train_loss/len(train_loader):.4f}, "  
-                  f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f}")  
-          
-        if patience_counter >= patience:  
-            print(f"早停於 epoch {epoch}")  
-            break  
-          
-        model.train()  
-      
-    # 載入最佳模型  
-    if best_model_state:  
-        model.load_state_dict(best_model_state)  
-      
-    # 儲存模型  
-    torch.save(model.state_dict(), output_path)  
-    print(f"✅ 改良版模型已訓練並儲存至 {output_path}")  
-      
-    return model, scaler  
-  
-def classify_depreciation_enhanced_mlp(metrics, mlp_model, scaler):  
-    """使用改良版 MLP 模型進行分類，自動適應特徵數量"""  
-    # 根據 scaler 的特徵數量決定使用哪些特徵  
-    scaler_features = scaler.n_features_in_  
-      
-    if scaler_features == 4:  
-        # 只使用基礎特徵  
-        features = [  
-            metrics["defect_index"], metrics["avg_depth"],   
-            metrics["max_depth"], metrics["total_area"]  
-        ]  
-    else:  
-        # 使用所有特徵  
-        features = [  
-            metrics["defect_index"], metrics["avg_depth"],   
-            metrics["max_depth"], metrics["total_area"],  
-            metrics.get("depth_std", 0), metrics.get("area_ratio", 0),   
-            metrics.get("defect_density", 0)  
-        ]  
-      
-    # 其餘邏輯保持不變  
-    features_scaled = scaler.transform([features])  
-    input_tensor = torch.tensor(features_scaled, dtype=torch.float32)  
-      
-    with torch.no_grad():  
-        logits = mlp_model(input_tensor)  
-        probs = torch.softmax(logits, dim=1)  
-        pred = torch.argmax(probs, dim=1).item()  
-        confidence = probs[0, pred].item()  
-          
-        entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).item()  
-        uncertainty = entropy / np.log(3)  
-      
-    labels = ["A - normal", "B - Under_observation", "C - Recommended_repair"]  
-    return labels[pred], confidence, uncertainty 
-  
-def generate_enhanced_depreciation_record(defects, mlp_model=None, scaler=None, image_shape=(256, 256)):  
-    """生成增強版折舊分析記錄，自動適應特徵數量"""  
-    # 根據是否有 scaler 決定特徵類型  
-    use_basic_only = scaler is None or scaler.n_features_in_ == 4  
-    metrics = compute_enhanced_depreciation_metrics(defects, image_shape, use_basic_features_only=use_basic_only)  
-      
-    if mlp_model and scaler:  
-        grade, confidence, uncertainty = classify_depreciation_enhanced_mlp(metrics, mlp_model, scaler)  
-    else:  
-        from train_depreciation_mlp import classify_depreciation  
-        grade = classify_depreciation(metrics["defect_index"])  
-        confidence = "N/A"  
-        uncertainty = "N/A"  
-      
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")  
-    return {  
-        "timestamp": timestamp,  
-        "grade": grade,  
-        "confidence": confidence,  
-        "uncertainty": uncertainty,  
-        **metrics,  
-        "defects": defects  
+
+    # 如果只需要基礎特徵，直接回傳
+    if use_basic_features_only:
+        return basic_metrics
+
+    # 額外特徵 - 計算進階統計特徵
+    depth_std = np.std(depths) if len(depths) > 1 else 0  # 計算深度標準差（需多於1個缺陷）
+    total_image_area = image_shape[0] * image_shape[1]    # 計算影像總面積
+    area_ratio = total_area / total_image_area            # 計算面積比例（缺陷面積/影像面積）
+    defect_density = len(defects) / total_image_area * 10000  # 計算缺陷密度（每萬像素的缺陷數）
+
+    # 回傳包含所有特徵的完整字典
+    return {
+        **basic_metrics,           # 展開基礎指標
+        "depth_std": depth_std,    # 深度標準差
+        "area_ratio": area_ratio,  # 面積比例
+        "defect_density": defect_density  # 缺陷密度
+    }
+
+def train_enhanced_mlp_from_csv(csv_path="depreciation_records.csv",
+                               output_path="enhanced_depreciation_mlp.pth",
+                               scaler_path="feature_scaler.pkl",
+                               epochs=100, patience=10):
+    """改良版 MLP 訓練函數
+    - 數據標準化
+    - 訓練/驗證分割
+    - 早停機制
+    - 學習率調度
+    - 類別權重平衡
+    """
+
+    # 讀取數據
+    df = pd.read_csv(csv_path)
+
+    # 特徵選擇（支援更多特徵）
+    feature_cols = ["defect_index", "avg_depth", "max_depth", "total_area"]
+    if "depth_std" in df.columns:
+        feature_cols.extend(["depth_std", "area_ratio", "defect_density"])
+
+    X = df[feature_cols].values
+    y = df["grade"].map({"A - normal": 0, "B - Under_observation": 1, "C - Recommended_repair": 2}).values
+
+    # 數據標準化
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # 儲存標準化器
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
+
+    # 訓練/驗證分割
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    # 轉換為張量
+    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.long)
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.long)
+
+    # 計算類別權重
+    class_weights = compute_class_weight('balanced', classes=np.unique(y), y=y)
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+
+    # 建立模型
+    model = EnhancedDepreciationMLP(input_dim=len(feature_cols))
+
+    # 載入已存在的模型（如果有）
+    if os.path.exists(output_path):
+        print(f"📂 載入已存在模型 {output_path}")
+        model.load_state_dict(torch.load(output_path, weights_only=True))
+
+    # 訓練設定
+    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+
+    # 早停設定
+    best_val_loss = float('inf')
+    patience_counter = 0
+    best_model_state = None
+
+    # 訓練迴圈
+    train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
+
+    model.train()
+    for epoch in range(epochs):
+        # 訓練階段
+        train_loss = 0
+        for batch_x, batch_y in train_loader:
+            optimizer.zero_grad()
+            logits = model(batch_x)
+            loss = criterion(logits, batch_y)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+
+        # 驗證階段
+        model.eval()
+        with torch.no_grad():
+            val_logits = model(X_val_tensor)
+            val_loss = criterion(val_logits, y_val_tensor).item()
+            val_acc = (torch.argmax(val_logits, dim=1) == y_val_tensor).float().mean().item()
+
+        # 學習率調度
+        scheduler.step(val_loss)
+
+        # 早停檢查
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+        else:
+            patience_counter += 1
+
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch}: Train Loss={train_loss/len(train_loader):.4f}, "
+                  f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f}")
+
+        if patience_counter >= patience:
+            print(f"早停於 epoch {epoch}")
+            break
+
+        model.train()
+
+    # 載入最佳模型
+    if best_model_state:
+        model.load_state_dict(best_model_state)
+
+    # 儲存模型
+    torch.save(model.state_dict(), output_path)
+    print(f"✅ 改良版模型已訓練並儲存至 {output_path}")
+
+    return model, scaler
+
+def classify_depreciation_enhanced_mlp(metrics, mlp_model, scaler):
+    """使用改良版 MLP 模型進行分類，自動適應特徵數量"""
+    # 根據 scaler 的特徵數量決定使用哪些特徵 - 檢查標準化器支援的特徵維度
+    scaler_features = scaler.n_features_in_
+
+    # 根據標準化器的特徵數量選擇對應的特徵集
+    if scaler_features == 4:
+        # 只使用基礎特徵 - 4個核心指標
+        features = [
+            metrics["defect_index"], metrics["avg_depth"],   # 折舊指數和平均深度
+            metrics["max_depth"], metrics["total_area"]      # 最大深度和總面積
+        ]
+    else:
+        # 使用所有特徵 - 包含基礎特徵和額外統計特徵
+        features = [
+            metrics["defect_index"], metrics["avg_depth"],   # 基礎特徵：折舊指數和平均深度
+            metrics["max_depth"], metrics["total_area"],     # 基礎特徵：最大深度和總面積
+            metrics.get("depth_std", 0), metrics.get("area_ratio", 0),   # 額外特徵：深度標準差和面積比例
+            metrics.get("defect_density", 0)                 # 額外特徵：缺陷密度
+        ]
+
+    # 其餘邏輯保持不變 - 特徵標準化和模型推論
+    features_scaled = scaler.transform([features])          # 使用標準化器對特徵進行標準化
+    input_tensor = torch.tensor(features_scaled, dtype=torch.float32)  # 轉換為 PyTorch 張量
+
+    # 停用梯度計算進行推論
+    with torch.no_grad():
+        """Logits 轉換為機率分布：使用 torch.softmax(logits, dim=1) 將模型的原始輸出 (logits) 轉換為機率分布，確保所有類別的機率總和為 1
+           取得預測類別：使用 torch.argmax(probs, dim=1).item() 找出機率最高的類別索引
+           提取信心度：confidence = probs[0, pred].item() 取得該預測類別的機率值作為信心度
+           例如，如果機率分布為 [0.12, 0.82, 0.06]，預測類別為索引 1 (B級)，則信心度為 0.82"""
+        logits = mlp_model(input_tensor)                    # 模型前向傳播，取得原始輸出
+        probs = torch.softmax(logits, dim=1)                # 將 logits 轉換為機率分布
+        pred = torch.argmax(probs, dim=1).item()            # 取得預測類別索引
+        confidence = probs[0, pred].item()                  # 取得預測類別的信心度
+
+        # 計算預測不確定性（基於熵）
+        """不確定性基於資訊熵 (entropy) 來衡量模型預測的不確定程度：
+            計算熵值：entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).item()
+            使用資訊熵公式：H = -Σ(p_i * log(p_i))
+            加入 1e-8 避免 log(0) 的數值錯誤
+            正規化不確定性：uncertainty = entropy / np.log(3)
+            除以最大可能熵值 (log(3)，因為有 3 個類別) 進行正規化
+            結果範圍在 0-1 之間，1 表示最大不確定性 """
+        entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).item()  # 計算熵值
+        uncertainty = entropy / np.log(3)                  # 正規化不確定性（除以最大熵值）
+
+    # 類別標籤對應
+    labels = ["A - normal", "B - Under_observation", "C - Recommended_repair"]
+    # 回傳預測等級、信心度和不確定性
+    return labels[pred], confidence, uncertainty
+
+def generate_enhanced_depreciation_record(defects, mlp_model=None, scaler=None, image_shape=(256, 256)):
+    """生成增強版折舊分析記錄，自動適應特徵數量
+    當有訓練好的 MLP 模型和標準化器時使用機器學習方法，否則回退到基於規則的分類。
+    函數會根據 scaler.n_features_in_ 自動適應使用 4 個基礎特徵或 7 個完整特徵集，確保與不同版本的訓練模型相容。
+    defect_index - 折舊指數（面積 × 深度的加總）
+    avg_depth - 平均深度
+    max_depth - 最大深度
+    total_area - 所有缺陷的總面積
+    額外:
+    depth_std - 深度標準差（衡量深度變異性）
+    area_ratio - 面積比例（缺陷總面積 / 影像總面積）
+    defect_density - 缺陷密度（每萬像素的缺陷數量）
+    """
+    # 根據是否有 scaler 決定特徵類型 - 判斷是否使用基礎特徵或完整特徵集
+    use_basic_only = scaler is None or scaler.n_features_in_ == 4
+    # 計算增強版折舊指標，根據 use_basic_only 決定特徵數量
+    metrics = compute_enhanced_depreciation_metrics(defects, image_shape, use_basic_features_only=use_basic_only)
+    # 如果有 MLP 模型和標準化器，使用機器學習分類
+    if mlp_model and scaler:
+        # 使用增強版 MLP 模型進行分類，回傳等級、信心度和不確定性
+        grade, confidence, uncertainty = classify_depreciation_enhanced_mlp(metrics, mlp_model, scaler)
+    else:
+        # 否則使用規則式分類方法
+        from train_depreciation_mlp import classify_depreciation
+        # 僅使用折舊指數進行簡單分級
+        grade = classify_depreciation(metrics["defect_index"])
+        # 規則式方法無法提供信心度和不確定性
+        confidence = "N/A"
+        uncertainty = "N/A"
+
+    # 產生當前時間戳記，格式為 YYYY-MM-DD HH:MM
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # 回傳完整的折舊分析記錄字典
+    return {
+        "timestamp": timestamp,        # 分析時間
+        "grade": grade,               # 折舊等級 (A/B/C)
+        "confidence": confidence,     # 模型信心度
+        "uncertainty": uncertainty,   # 預測不確定性
+        **metrics,                   # 展開所有計算的指標
+        "defects": defects           # 原始缺陷清單
     }
