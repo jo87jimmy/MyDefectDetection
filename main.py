@@ -406,17 +406,10 @@ for item in items:
                 print(f"⚠️ 載入改良版模型失敗: {e}")
                 enhanced_mlp_model = None
 
-        # 使用改良版分析（如果可用）todo測試並且拿掉else
-        if enhanced_mlp_model and scaler:
-            record = generate_enhanced_depreciation_record(
-                defects, enhanced_mlp_model, scaler, image_shape=(256, 256)
-            )
-            print(f"📊 改良版 MLP 分析 - 等級: {record['grade']}, "
-                f"信心: {record['confidence']:.3f}, 不確定性: {record['uncertainty']:.3f}")
-        else:
-            # 回退到原始方法
-            record = generate_depreciation_record(defects)
-            print(f"📊 規則式分析 - 等級: {record['grade']}")
+        # 使用改良版分析（如果可用）
+        record = generate_enhanced_depreciation_record(
+            defects, enhanced_mlp_model, scaler, image_shape=(256, 256)
+        )
 
         # 儲存記錄
         save_record_to_csv(record)
@@ -444,15 +437,16 @@ for item in items:
                 print(f"❌ 無法修復 CSV 檔案: {e2}")
                 # 建立空的 DataFrame 繼續執行
                 df = pd.DataFrame()
-        # 在讀取 CSV 成功後加入重訓練邏輯  
-        if not df.empty:  
-            # 更智能的重訓練條件：至少50筆數據，每20筆重訓練一次  
-            if len(df) >= 50 and len(df) % 20 == 0:  
-                print("🔄 觸發改良版 MLP 重訓練...")  
-                try:  
-                    enhanced_mlp_model, scaler = train_enhanced_mlp_from_csv()  
-                    print("✅ 改良版 MLP 重訓練完成")  
-                except Exception as e:  
+        # 在讀取 CSV 成功後加入重訓練邏輯
+        if not df.empty:
+            # 更智能的重訓練條件：至少50筆數據，每20筆重訓練一次
+            if len(df) >= 50 and len(df) % 20 == 0:
+                print("🔄 觸發改良版 MLP 重訓練...")
+                try:
+                    #todo
+                    enhanced_mlp_model, scaler = train_enhanced_mlp_from_csv()
+                    print("✅ 改良版 MLP 重訓練完成")
+                except Exception as e:
                     print(f"⚠️ 重訓練失敗: {e}")
 
 
