@@ -99,6 +99,10 @@ def classify_depreciation(defect_index):
         其他考慮的方案：
         標準差法：A<2971, B<6225, C≥6225
         保守法：A<4631, B<6741, C≥6741 """
+    """"雖然規則式分類在初期很實用，但隨著數據累積，
+    機器學習方法通常能提供更好的分類準確性和適應性。
+    MyDefectDetection 系統的混合架構設計體現了這種漸進式改進的最佳實踐。"""
+
     if defect_index < 3876:
         return "A - normal"
     elif defect_index < 5554:
@@ -282,110 +286,116 @@ def train_enhanced_mlp_from_csv(csv_path="depreciation_records.csv",
     - 類別權重平衡
     """
 
-    # 讀取數據
+    # 讀取數據 - 從 CSV 檔案載入折舊分析記錄
     df = pd.read_csv(csv_path)
 
-    # 特徵選擇（支援更多特徵）
+    # 特徵選擇（支援更多特徵）- 先設定基礎特徵集
     feature_cols = ["defect_index", "avg_depth", "max_depth", "total_area"]
+    # 檢查是否有額外特徵欄位，若有則擴展特徵集
     if "depth_std" in df.columns:
         feature_cols.extend(["depth_std", "area_ratio", "defect_density"])
 
-    X = df[feature_cols].values
+    # 提取特徵矩陣和標籤向量
+    X = df[feature_cols].values  # 特徵數據
+    # 將等級字串映射為數值標籤 (A=0, B=1, C=2)
     y = df["grade"].map({"A - normal": 0, "B - Under_observation": 1, "C - Recommended_repair": 2}).values
 
-    # 數據標準化
+    # 數據標準化 - 建立標準化器並對特徵進行標準化
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X_scaled = scaler.fit_transform(X)  # 計算均值和標準差並標準化
 
-    # 儲存標準化器
+    # 儲存標準化器 - 保存以供後續推論使用
     with open(scaler_path, 'wb') as f:
         pickle.dump(scaler, f)
 
-    # 訓練/驗證分割
+    # 訓練/驗證分割 - 分層抽樣確保各類別比例一致
     X_train, X_val, y_train, y_val = train_test_split(
         X_scaled, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # 轉換為張量
-    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train, dtype=torch.long)
-    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
-    y_val_tensor = torch.tensor(y_val, dtype=torch.long)
+    # 轉換為張量 - 將 NumPy 陣列轉換為 PyTorch 張量
+    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)  # 訓練特徵
+    y_train_tensor = torch.tensor(y_train, dtype=torch.long)     # 訓練標籤
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)      # 驗證特徵
+    y_val_tensor = torch.tensor(y_val, dtype=torch.long)         # 驗證標籤
 
-    # 計算類別權重
+    # 計算類別權重 - 處理類別不平衡問題
     class_weights = compute_class_weight('balanced', classes=np.unique(y), y=y)
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
 
-    # 建立模型
+    # 建立模型 - 根據特徵數量設定輸入維度
     model = EnhancedDepreciationMLP(input_dim=len(feature_cols))
 
-    # 載入已存在的模型（如果有）
+    # 載入已存在的模型（如果有）- 支援增量訓練
     if os.path.exists(output_path):
         print(f"📂 載入已存在模型 {output_path}")
         model.load_state_dict(torch.load(output_path, weights_only=True))
 
-    # 訓練設定
-    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
-    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    # 訓練設定 - 配置損失函數、優化器和學習率調度器
+    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)  # 加權交叉熵損失
+    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)  # AdamW 優化器
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)  # 學習率調度
 
-    # 早停設定
-    best_val_loss = float('inf')
-    patience_counter = 0
-    best_model_state = None
+    # 早停設定 - 防止過擬合
+    best_val_loss = float('inf')  # 記錄最佳驗證損失
+    patience_counter = 0          # 耐心計數器
+    best_model_state = None       # 最佳模型狀態
 
-    # 訓練迴圈
+    # 訓練迴圈 - 建立數據載入器並開始訓練
     train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-    model.train()
+    model.train()  # 設定為訓練模式
     for epoch in range(epochs):
-        # 訓練階段
+        # 訓練階段 - 批次訓練
         train_loss = 0
         for batch_x, batch_y in train_loader:
-            optimizer.zero_grad()
-            logits = model(batch_x)
-            loss = criterion(logits, batch_y)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
+            optimizer.zero_grad()    # 清零梯度
+            logits = model(batch_x)  # 前向傳播
+            loss = criterion(logits, batch_y)  # 計算損失
+            loss.backward()          # 反向傳播
+            optimizer.step()         # 更新參數
+            train_loss += loss.item()  # 累積損失
 
-        # 驗證階段
-        model.eval()
-        with torch.no_grad():
-            val_logits = model(X_val_tensor)
-            val_loss = criterion(val_logits, y_val_tensor).item()
-            val_acc = (torch.argmax(val_logits, dim=1) == y_val_tensor).float().mean().item()
+        # 驗證階段 - 評估模型性能
+        model.eval()  # 設定為評估模式
+        with torch.no_grad():  # 停用梯度計算
+            val_logits = model(X_val_tensor)  # 驗證集前向傳播
+            val_loss = criterion(val_logits, y_val_tensor).item()  # 計算驗證損失
+            val_acc = (torch.argmax(val_logits, dim=1) == y_val_tensor).float().mean().item()  # 計算準確率
 
-        # 學習率調度
+        # 學習率調度 - 根據驗證損失調整學習率
         scheduler.step(val_loss)
 
-        # 早停檢查
+        # 早停檢查 - 監控驗證損失改善情況
         if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            patience_counter = 0
-            best_model_state = model.state_dict().copy()
+            best_val_loss = val_loss  # 更新最佳損失
+            patience_counter = 0      # 重置耐心計數器
+            best_model_state = model.state_dict().copy()  # 保存最佳模型狀態
         else:
-            patience_counter += 1
+            patience_counter += 1     # 增加耐心計數器
 
+        # 每 10 個 epoch 輸出訓練進度
         if epoch % 10 == 0:
             print(f"Epoch {epoch}: Train Loss={train_loss/len(train_loader):.4f}, "
                   f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f}")
 
+        # 早停條件檢查 - 若驗證損失長時間未改善則停止訓練
         if patience_counter >= patience:
             print(f"早停於 epoch {epoch}")
             break
 
-        model.train()
+        model.train()  # 回到訓練模式
 
-    # 載入最佳模型
+    # 載入最佳模型 - 恢復驗證損失最低時的模型狀態
     if best_model_state:
         model.load_state_dict(best_model_state)
 
-    # 儲存模型
+    # 儲存模型 - 保存訓練完成的模型權重
     torch.save(model.state_dict(), output_path)
     print(f"✅ 改良版模型已訓練並儲存至 {output_path}")
 
+    # 回傳訓練完成的模型和標準化器
     return model, scaler
 
 def classify_depreciation_enhanced_mlp(metrics, mlp_model, scaler):

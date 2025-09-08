@@ -406,7 +406,7 @@ for item in items:
                 print(f"⚠️ 載入改良版模型失敗: {e}")
                 enhanced_mlp_model = None
 
-        # 使用改良版分析（如果可用）todo可以拿掉else
+        # 使用改良版分析（如果可用）todo測試並且拿掉else
         if enhanced_mlp_model and scaler:
             record = generate_enhanced_depreciation_record(
                 defects, enhanced_mlp_model, scaler, image_shape=(256, 256)
