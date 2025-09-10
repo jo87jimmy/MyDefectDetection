@@ -4,13 +4,13 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import os
-
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 import pickle
+import json
 
 
 def classify_depreciation(defect_index):
@@ -401,13 +401,13 @@ def generate_comparison_depreciation_record_with_excel(defects,
                                                        scaler=None,
                                                        image_shape=(256, 256),
                                                        output_excel=True):
-    """生成對照實驗的折舊分析記錄，同時測試 MLP 和規則式分類  
-      
-    此函數會同時運行兩種分類方法並記錄結果差異：  
-    1. MLP 機器學習分類（如果模型可用）  
-    2. 規則式閾值分類  
-      
-    返回包含兩種方法結果的完整比較記錄 生成對照實驗記錄並輸出 Excel 檔案 
+    """生成對照實驗的折舊分析記錄，同時測試 MLP 和規則式分類
+
+    此函數會同時運行兩種分類方法並記錄結果差異：
+    1. MLP 機器學習分類（如果模型可用）
+    2. 規則式閾值分類
+
+    返回包含兩種方法結果的完整比較記錄 生成對照實驗記錄並輸出 Excel 檔案
     """
 
     from train_depreciation_mlp import classify_depreciation
@@ -615,93 +615,6 @@ def interpret_comparison_results(record):
         print("   → 可接受結果，但建議定期抽查")
 
 
-# def save_comparison_to_excel(record, excel_path="comparison_analysis.xlsx"):
-#     """將對照實驗記錄儲存為 Excel 檔案，包含多個工作表"""
-#     import pandas as pd
-#     import json
-#     from datetime import datetime
-
-#     # 準備記錄副本並處理 NumPy 類型
-#     record_copy = record.copy()
-
-#     # 轉換 defects 為 JSON 字串（參考現有的轉換邏輯）
-#     if 'defects' in record_copy:
-
-#         def convert_numpy_types(obj):
-#             if isinstance(obj, dict):
-#                 return {k: convert_numpy_types(v) for k, v in obj.items()}
-#             elif isinstance(obj, list):
-#                 return [convert_numpy_types(item) for item in obj]
-#             elif isinstance(obj, (np.integer, np.int64, np.int32)):
-#                 return int(obj)
-#             elif isinstance(obj, (np.floating, np.float64, np.float32)):
-#                 return float(obj)
-#             elif isinstance(obj, np.ndarray):
-#                 return obj.tolist()
-#             else:
-#                 return obj
-
-#         cleaned_defects = convert_numpy_types(record_copy['defects'])
-#         record_copy['defects'] = json.dumps(cleaned_defects)
-
-#     # 清理其他 NumPy 類型
-#     for key, value in record_copy.items():
-#         if isinstance(value, (np.integer, np.int64, np.int32)):
-#             record_copy[key] = int(value)
-#         elif isinstance(value, (np.floating, np.float64, np.float32)):
-#             record_copy[key] = float(value)
-
-#     try:
-#         # 建立 Excel 寫入器
-#         with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-
-#             # 工作表1：完整記錄
-#             df_full = pd.DataFrame([record_copy])
-#             df_full.to_excel(writer, sheet_name='完整記錄', index=False)
-
-#             # 工作表2：方法比較摘要
-#             comparison_summary = {
-#                 '分析時間': [record['timestamp']],
-#                 'MLP等級': [record['mlp_grade']],
-#                 'MLP信心度': [record['mlp_confidence']],
-#                 'MLP不確定性': [record['mlp_uncertainty']],
-#                 '規則式等級': [record['rule_grade']],
-#                 '方法一致性': [record['methods_agree']],
-#                 '差異描述': [record['grade_difference'] or '無差異'],
-#                 '折舊指數': [record['defect_index']],
-#                 '缺陷數量': [record['defect_count']],
-#                 '總面積': [record['total_area']]
-#             }
-#             df_comparison = pd.DataFrame(comparison_summary)
-#             df_comparison.to_excel(writer, sheet_name='方法比較', index=False)
-
-#             # 工作表3：缺陷詳細資訊
-#             if record['defects']:
-#                 defects_data = []
-#                 for i, defect in enumerate(record['defects']):
-#                     defects_data.append({
-#                         '缺陷編號': i + 1,
-#                         '面積': defect['area'],
-#                         '深度': defect['depth'],
-#                         '中心X': defect['center'][0],
-#                         '中心Y': defect['center'][1],
-#                         '寬度': defect['size'][0],
-#                         '高度': defect['size'][1]
-#                     })
-#                 df_defects = pd.DataFrame(defects_data)
-#                 df_defects.to_excel(writer, sheet_name='缺陷詳情', index=False)
-
-#         print(f"✅ Excel 對照實驗記錄已儲存至 {excel_path}")
-
-#     except Exception as e:
-#         print(f"⚠️ 儲存 Excel 失敗: {e}")
-
-import pandas as pd
-import os
-import json
-import numpy as np
-
-
 def save_record_to_csv(record, csv_path="depreciation_records.csv"):
     """改良版 CSV 儲存函數，確保數據格式正確並處理 NumPy 類型"""
     record_copy = record.copy()
@@ -743,3 +656,48 @@ def save_record_to_csv(record, csv_path="depreciation_records.csv"):
         print(f"✅ 記錄已儲存至 {csv_path}")
     except Exception as e:
         print(f"⚠️ 儲存 CSV 失敗: {e}")
+
+
+#邊界效應分析函數
+def analyze_boundary_effects(record, boundary_tolerance=200):
+    """分析接近閾值邊界的案例表現"""
+    defect_index = record['defect_index']
+
+    # 定義邊界區間
+    ab_boundary = 3876
+    bc_boundary = 5554
+
+    boundary_analysis = {
+        "is_boundary_case": False,
+        "boundary_type": None,
+        "distance_to_boundary": None,
+        "risk_level": "normal"
+    }
+
+    # 檢查是否接近 A/B 邊界
+    if abs(defect_index - ab_boundary) <= boundary_tolerance:
+        boundary_analysis.update({
+            "is_boundary_case":
+            True,
+            "boundary_type":
+            "A/B",
+            "distance_to_boundary":
+            abs(defect_index - ab_boundary),
+            "risk_level":
+            "high" if abs(defect_index - ab_boundary) < 100 else "medium"
+        })
+
+    # 檢查是否接近 B/C 邊界
+    elif abs(defect_index - bc_boundary) <= boundary_tolerance:
+        boundary_analysis.update({
+            "is_boundary_case":
+            True,
+            "boundary_type":
+            "B/C",
+            "distance_to_boundary":
+            abs(defect_index - bc_boundary),
+            "risk_level":
+            "high" if abs(defect_index - bc_boundary) < 100 else "medium"
+        })
+
+    return boundary_analysis
