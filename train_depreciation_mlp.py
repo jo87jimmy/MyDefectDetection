@@ -410,10 +410,10 @@ def generate_comparison_depreciation_record_with_excel(defects,
     返回包含兩種方法結果的完整比較記錄 生成對照實驗記錄並輸出 Excel 檔案
     """
 
-    from train_depreciation_mlp import classify_depreciation
+    # from train_depreciation_mlp import classify_depreciation
     from datetime import datetime
-    import pandas as pd
-    import os
+    # import pandas as pd
+    # import os
 
     # 根據是否有 scaler 決定特徵類型
     use_basic_only = scaler is None or scaler.n_features_in_ == 4
